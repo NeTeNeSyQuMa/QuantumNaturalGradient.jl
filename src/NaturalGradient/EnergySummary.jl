@@ -102,25 +102,12 @@ function uncentered(Es::EnergySummary)
     return Esd .+ Es.mean
 end
 
-# function effective_sample_nr(Es::EnergySummary)
-#     if Es.importance_weights === nothing
-#         return length(Es)
-#     else
-#         error = energy_error(Es)
-#         return Es.var / error^2
-#     end
-# end
 function effective_sample_nr(Es::EnergySummary)
     if Es.importance_weights === nothing
         return length(Es)
     else
         error = energy_error(Es)
-
-        if error == 0
-            return 0.0
-        else
-            return Es.var / error^2
-        end
+        return Es.var / error^2
     end
 end
 
