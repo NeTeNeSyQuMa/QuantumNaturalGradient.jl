@@ -23,9 +23,11 @@ function wmean_and_var(arr::AbstractArray{<:Number}; weights_=nothing, kwargs...
         @assert prod(size(weights_)) == size_ "The size of the weights_ array must be the same as the dimensions of the array to be averaged."
         n = mean(weights_; kwargs...)
         mean_ = wmean(arr; weights_, kwargs...) ./ n
-        f = size_ / (size_ - 1) ./ n
+        N_eff = sum(weights_)^2/sum(weights_.^2)
+        f = N_eff/(N_eff - 1)
         arr_m_ = arr .- mean_
-        var_ = wmean(arr_m_ .* conj(arr_m_); weights_, kwargs...)  .* f
+        var_ = wmean(arr_m_ .* conj(arr_m_); weights_, kwargs...) * f
+
     else
         mean_ = mean(arr; kwargs...)
         f = size_ / (size_ - 1)
