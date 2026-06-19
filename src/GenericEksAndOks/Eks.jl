@@ -68,8 +68,18 @@ function TensorOperatorSum(ham::OpSum, hilbert::Array; combine_tensors=true, sor
 
     for (i, o) in enumerate(ham)
         o = isfermionic ? insert_JW_string(o, hilbert_flat) : o
-        tensors[i] = ITensor(o, hilbert[:])
-        sites[i] = get_active_sites(o)
+
+        t = ITensor(o, hilbert[:])
+        if !is_diagonal(t) || !sort_diag
+            push!(tensors, t)
+            push!(sites, get_active_sites(o))
+        else
+            as = unique(get_active_sites(o))
+            v = get_diagonal_representation(t, hilbert_flat[as])
+            push!(diag_tensors, v)
+            push!(diag_dims, dims(hilbert_flat[as]))
+            push!(diag_sites, as)
+        end
     end
 
     tso = TensorOperatorSum(tensors, diag_tensors, diag_dims, hilbert, sites, diag_sites)
