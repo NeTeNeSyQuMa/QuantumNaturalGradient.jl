@@ -2,8 +2,11 @@ abstract type AbstractTensorOperatorSum end
 
 struct TensorOperatorSum <: AbstractTensorOperatorSum
     tensors::Vector{ITensor}
+    diag_tensors::Vector{Vector}
+    diag_dims::Vector{Vector}
     hilbert::Array{<:Index}
     sites::Vector{Vector}
+    diag_sites::Vector{Vector}
 end
 Base.size(t::TensorOperatorSum, args...) = size(t.hilbert, args...)
 Base.ndims(t::TensorOperatorSum) = ndims(t.hilbert)
@@ -46,10 +49,14 @@ end
     TensorOperatorSum(tensors, hilbert, sites)
     Generates a TensorOperatorSum from a hamiltonian and a hilbert space. It precomputes the sites where the operator acts on.
 """
-function TensorOperatorSum(ham::OpSum, hilbert::Array; combine_tensors=true)
-    
-    tensors = Vector{ITensor}(undef, length(ham))
-    sites = Vector{Vector{Int}}(undef, length(ham))
+function TensorOperatorSum(ham::OpSum, hilbert::Array; combine_tensors=true, sort_diag=true)
+
+    tensors = Vector{ITensor}()
+    sites = Vector{Vector{Int}}()
+    diag_tensors = Vector{Vector}()
+    diag_dims = Vector{Vector}()
+    diag_sites = Vector{Vector{Int}}()
+
     hilbert_flat = hilbert
     if ndims(hilbert) > 1
         hilbert_flat = hilbert[:]
@@ -64,7 +71,8 @@ function TensorOperatorSum(ham::OpSum, hilbert::Array; combine_tensors=true)
         tensors[i] = ITensor(o, hilbert[:])
         sites[i] = get_active_sites(o)
     end
-    tso = TensorOperatorSum(tensors, hilbert, sites)
+
+    tso = TensorOperatorSum(tensors, diag_tensors, diag_dims, hilbert, sites, diag_sites)
     if combine_tensors
         tso = combine_tensors_at_same_site(tso)
     end
@@ -75,6 +83,47 @@ end
 
 convert_eltype(::Type{S}, t::ITensor) where S = ITensor(S.(t.tensor))
 TensorOperatorSum(::Type{S}, t::TensorOperatorSum) where S = TensorOperatorSum(convert_eltype.(S, t.tensors), t.hilbert, t.sites)
+
+function is_diagonal(Oper::ITensor)
+    pair = []
+    indis = inds(Oper)
+    for i in 1:length(indis)-1
+        for j in i+1:length(indis)
+            if noprime(indis[i]) == noprime(indis[j])
+                push!(pair, (i,j))
+            end
+        end
+    end
+
+    len = Int(sqrt(prod(dim.(indis))))
+    v = zeros(len)
+
+    nonTrivialOperations = findall(x -> x != 0, Oper.tensor)
+    for ci in nonTrivialOperations
+        for p in pair
+            if ci[p[1]] != ci[p[2]]
+                return false
+            end
+        end
+    end
+    return true
+end
+
+function get_diagonal_representation(Oper::ITensor, active_site_inds)
+    Oper = permute(Oper, reduce(vcat, [[active_site_inds[i]', active_site_inds[i]] for i in 1:length(active_site_inds)]))
+
+    len = Int(prod(dims(active_site_inds)))
+    v = zeros(len)
+    nonTrivialOperations = findall(x -> x != 0, Oper.tensor)
+    for ci in nonTrivialOperations
+        S = 0
+        for i in 1:length(active_site_inds)
+            S += prod(dims(active_site_inds)[1:i-1]) * (ci[2*i]-1)
+        end
+        v[S + 1] = Oper[ci][1]
+    end
+    return v
+end
 
 
 function get_precomp_sOψ_elems_slow!(tensor::ITensor, sites::Vector, sample_, hilbert; sum_precompute=DefaultOrderedDict(()->0), offset=1, get_flip_sites=false)
@@ -179,7 +228,15 @@ function get_precomp_sOψ_elems(tso::TensorOperatorSum, sample_::Array{T, N}; su
     for (tensor, sites) in zip(tso.tensors, tso.sites)
         get_precomp_sOψ_elems!(tensor, sites, sample_o, tso.hilbert[:]; sum_precompute, offset, kwargs...)
     end
-    
+
+    for (tensor, dimen, sites) in zip(tso.diag_tensors, tso.diag_dims, tso.diag_sites)
+        S = 0
+        for i in 1:length(sites)
+            S +=  prod(dimen[1:i-1]) * (sample_o[sites[i]]-1)
+        end
+        sum_precompute[()] += tensor[S+1]
+    end
+
     # Remove zeros and make real if the imaginary part is too small
     for (key, value) in sum_precompute
         if value == 0.
@@ -366,7 +423,7 @@ function combine_tensors_at_same_site(tso::TensorOperatorSum)
     sites = first.(tensors_sites)
     tensors = second.(tensors_sites)
 
-    return TensorOperatorSum(tensors, tso.hilbert, sites)
+    return TensorOperatorSum(tensors, tso.diag_tensors, tso.diag_dims, tso.hilbert, sites, tso.diag_sites)
 end
 
 function cast_real_if_complex_is_zero!(tso::TensorOperatorSum)
