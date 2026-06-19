@@ -14,6 +14,37 @@ Base.ndims(t::TensorOperatorSum) = ndims(t.hilbert)
 Base.show(io::IO, t::TensorOperatorSum) = print(io, "TensorOperatorSum(nr_tensors=$(length(t.tensors)), hilbert_size=$(size(t)))")
 
 
+function insert_JW_string(o::ITensors.Scaled, hilbert::Array)
+    c = ITensors.coefficient(o)
+    p = ITensors.argument(o)  # Prod{Op}
+    return c * insert_JW_string(p, hilbert)
+end
+
+"""
+    insert_JW_string(p::ITensors.Prod{ITensors.Op}, hilbert)
+
+    Finds the left and right most site in `p` and inserts a JW string inbetween if the sitetype is fermionic.
+"""
+function insert_JW_string(p::ITensors.Prod{ITensors.Op}, hilbert::Array)
+    ops = collect(p)
+    fermionic_sites = [only(ITensors.sites(op)) for op in ops
+                       if ITensors.has_fermion_string(ITensors.which_op(op), hilbert[only(ITensors.sites(op))])]
+    
+    # If there are no fermionic sites, return the original operator
+    # Note: N=Cdag C also has no fermionic string
+    isempty(fermionic_sites) && return p
+
+    # find left and right most site in the ordering
+    l = minimum(fermionic_sites) # left most site
+    r = maximum(fermionic_sites) # right most site
+
+    # insert JW string between l and r
+    for n in (l+1):(r-1)
+        p *= ITensors.Op("F", n)
+    end
+    return p
+end
+
 """
     TensorOperatorSum(tensors, hilbert, sites)
     Generates a TensorOperatorSum from a hamiltonian and a hilbert space. It precomputes the sites where the operator acts on.
@@ -33,7 +64,11 @@ function TensorOperatorSum(ham::OpSum, hilbert::Array; combine_tensors=true, sor
         ham = reduce_dim(ham, size(hilbert))
     end
     
+    isfermionic = hastags(hilbert_flat[1], "Fermion")
+
     for (i, o) in enumerate(ham)
+        o = isfermionic ? insert_JW_string(o, hilbert_flat) : o
+
         t = ITensor(o, hilbert[:])
         if !is_diagonal(t) || !sort_diag
             push!(tensors, t)
