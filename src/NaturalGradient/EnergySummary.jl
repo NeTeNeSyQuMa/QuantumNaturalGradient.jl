@@ -52,8 +52,10 @@ function EnergySummary(Eks::Vector{Float64}; importance_weights=nothing, mean_=n
 
     if importance_weights !== nothing
         # The estimator for the mean energy is defined as X_k = E_k * w_k; therefore, the variance of X_k represents the error of the estimator.
-        std_of_mean = std(real.(Eks_c .* importance_weights))
-        
+        # std_of_mean = std(real.(Eks_c .* importance_weights))
+        w_norm = importance_weights ./ mean(importance_weights)
+        std_of_mean = std(real.(Eks_c .* w_norm))
+    
         # The estimator for the variance of the energy is defined as X_k = (E_k - <E>)^2 * w_k; similarly, the variance of X_k represents the error of this estimator.
         std_of_var = std(real.(Eks_c .^2 .* importance_weights))
         
