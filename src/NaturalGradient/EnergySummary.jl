@@ -102,13 +102,22 @@ function uncentered(Es::EnergySummary)
     return Esd .+ Es.mean
 end
 
-function effective_sample_nr(Es::EnergySummary)
-    if Es.importance_weights === nothing
-        return length(Es)
-    else
-        error = energy_error(Es)
-        return Es.var / error^2
-    end
+function weight_effective_sample_nr(Es::EnergySummary)
+    """
+    Effective number of equally weighted samples implied by the importance weights.    
+    """
+    w = Es.importance_weights
+    w === nothing && return length(Es)
+    return abs2(sum(w)) / sum(abs2, w)
+end
+
+function variance_equivalent_sample_nr(Es::EnergySummary)
+    """
+    Number of unweighted independent samples with variance Es.var
+    that would give the same estimated error of the mean energy.    
+    """
+    err = energy_error(Es)
+    return Es.var / err^2
 end
 
 function Base.show(io::IO, Es::EnergySummary)
@@ -120,7 +129,8 @@ function Base.show(io::IO, Es::EnergySummary)
     digits = Int(min(ceil(-log10(error2)), 10)) + 1
     Evar_str = "var(E) = $(round(Es.var, digits=digits)) ± $(round(error2, digits=digits))"
     
-    N_eff = effective_sample_nr(Es)
+    # N_eff = variance_equivalent_sample_nr(Es)
+    N_eff = weight_effective_sample_nr(Es)
     N_eff_str = ""
     if N_eff != length(Es)
         N_eff_str = ", Nₑ=$(isnan(N_eff) ? "NaN" : round(Int, N_eff))"
