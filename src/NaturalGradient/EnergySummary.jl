@@ -14,9 +14,11 @@ end
 EnergySummary(ψ::MPS, H::MPO; sample_nr=1000) = EnergySummary([Ek(ψ, H) for _ in 1:sample_nr])
 
 function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing, mean_=nothing, var_=nothing, kwargs...)
+    w_norm = importance_weights === nothing ? nothing : importance_weights ./ mean(importance_weights)
+
     if any(imag.(Eks) .> 1e-10)
         if mean_ === nothing || var_ === nothing
-            mean_, var_ = wmean_and_var(Eks; weights_=importance_weights)
+            mean_, var_ = wmean_and_var(Eks; weights_=w_norm)
         end
         Eks_c = Eks .- mean_
 
@@ -25,13 +27,14 @@ function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing
 
         if importance_weights !== nothing
             # The estimator for the mean energy is defined as X_k = E_k * w_k; therefore, the variance of X_k represents the error of the estimator.
-            std_of_mean = std(real.(Eks_c .* importance_weights))
+            # std_of_mean = std(real.(Eks_c .* importance_weights))
+            std_of_mean = std(real.(Eks_c .* w_norm))
             
             # The estimator for the variance of the energy is defined as X_k = (E_k - <E>)^2 * w_k; similarly, the variance of X_k represents the error of this estimator.
-            std_of_var = std(real.((Eks_c .* conj(Eks_c)) .* importance_weights))
+            std_of_var = std(real.((Eks_c .* conj(Eks_c)) .* w_norm))
             
             # The Eks are multiplied by the square root of the importance weights. This ensures that the product with (Oks * sqrt(importance_weights)) correctly recovers the importance weights to the first power.
-            Eks_c = Eks_c .* sqrt.(importance_weights)
+            Eks_c = Eks_c .* sqrt.(w_norm)
         else
             std_of_mean = sqrt(real.(var_))
             std_of_var = std(Eks_c .* conj(Eks_c))
@@ -42,8 +45,10 @@ function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing
 end
 
 function EnergySummary(Eks::Vector{Float64}; importance_weights=nothing, mean_=nothing, var_=nothing, kwargs...)
+    w_norm = importance_weights === nothing ? nothing : importance_weights ./ mean(importance_weights)
+
     if mean_ === nothing || var_ === nothing
-        mean_, var_ = wmean_and_var(Eks; weights_=importance_weights)
+        mean_, var_ = wmean_and_var(Eks; weights_=w_norm)
     end
     Eks_c = real.(Eks .- mean_)
 
@@ -52,13 +57,13 @@ function EnergySummary(Eks::Vector{Float64}; importance_weights=nothing, mean_=n
 
     if importance_weights !== nothing
         # The estimator for the mean energy is defined as X_k = E_k * w_k; therefore, the variance of X_k represents the error of the estimator.
-        std_of_mean = std(real.(Eks_c .* importance_weights))
+        std_of_mean = std(real.(Eks_c .* w_norm))
         
         # The estimator for the variance of the energy is defined as X_k = (E_k - <E>)^2 * w_k; similarly, the variance of X_k represents the error of this estimator.
-        std_of_var = std(real.(Eks_c .^2 .* importance_weights))
+        std_of_var = std(real.(Eks_c .^2 .* w_norm))
         
         # The Eks are multiplied by the square root of the importance weights. This ensures that the product with (Oks * sqrt(importance_weights)) correctly recovers the importance weights to the first power.
-        Eks_c = Eks_c .* sqrt.(importance_weights)
+        Eks_c = Eks_c .* sqrt.(w_norm)
     else
         std_of_mean = sqrt(real.(var_))
         std_of_var = std(Eks_c .^ 2)
@@ -111,6 +116,24 @@ function effective_sample_nr(Es::EnergySummary)
     end
 end
 
+function weight_effective_sample_nr(Es::EnergySummary)
+    """
+    Effective number of equally weighted samples implied by the importance weights.    
+    """
+    w = Es.importance_weights
+    w === nothing && return length(Es)
+    return abs2(sum(w)) / sum(abs2, w)
+end
+
+function variance_equivalent_sample_nr(Es::EnergySummary)
+    """
+    Number of unweighted independent samples with variance Es.var
+    that would give the same estimated error of the mean energy.    
+    """
+    err = energy_error(Es)
+    return Es.var / err^2
+end
+
 function Base.show(io::IO, Es::EnergySummary)
     error = energy_error(Es)
     digits = Int(min(ceil(-log10(error)), 10)) + 1
@@ -120,7 +143,9 @@ function Base.show(io::IO, Es::EnergySummary)
     digits = Int(min(ceil(-log10(error2)), 10)) + 1
     Evar_str = "var(E) = $(round(Es.var, digits=digits)) ± $(round(error2, digits=digits))"
     
-    N_eff = effective_sample_nr(Es)
+    # N_eff = variance_equivalent_sample_nr(Es)
+    N_eff = weight_effective_sample_nr(Es)
+
     N_eff_str = ""
     if N_eff != length(Es)
         N_eff_str = ", Nₑ=$(isnan(N_eff) ? "NaN" : round(Int, N_eff))"
