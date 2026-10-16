@@ -16,7 +16,7 @@ EnergySummary(ψ::MPS, H::MPO; sample_nr=1000) = EnergySummary([Ek(ψ, H) for _ 
 function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing, mean_=nothing, var_=nothing, kwargs...)
     w_norm = importance_weights === nothing ? nothing : importance_weights ./ mean(importance_weights)
 
-    if abs.(imag.(Eks) .> 1e-10)
+    if any(abs.(imag.(Eks)) .> 1e-10)
         if mean_ === nothing || var_ === nothing
             mean_, var_ = wmean_and_var(Eks; weights_=w_norm)
         end
