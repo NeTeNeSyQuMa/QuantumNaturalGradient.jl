@@ -16,7 +16,7 @@ EnergySummary(ψ::MPS, H::MPO; sample_nr=1000) = EnergySummary([Ek(ψ, H) for _ 
 function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing, mean_=nothing, var_=nothing, kwargs...)
     w_norm = importance_weights === nothing ? nothing : importance_weights ./ mean(importance_weights)
 
-    if any(imag.(Eks) .> 1e-10)
+    if any(abs.(imag.(Eks)) .> 1e-10)
         if mean_ === nothing || var_ === nothing
             mean_, var_ = wmean_and_var(Eks; weights_=w_norm)
         end
@@ -27,19 +27,26 @@ function EnergySummary(Eks::Vector{Complex{Float64}}; importance_weights=nothing
 
         if importance_weights !== nothing
             # The estimator for the mean energy is defined as X_k = E_k * w_k; therefore, the variance of X_k represents the error of the estimator.
-            # std_of_mean = std(real.(Eks_c .* importance_weights))
             std_of_mean = std(real.(Eks_c .* w_norm))
             
-            # The estimator for the variance of the energy is defined as X_k = (E_k - <E>)^2 * w_k; similarly, the variance of X_k represents the error of this estimator.
-            std_of_var = std(real.((Eks_c .* conj(Eks_c)) .* w_norm))
+            # The estimator for the variance of the energy is defined as X_k = ((E_k - <E>)^2 - m2) * w_k; 
+            #  m2 = Σₖ w_k q_k / Σₖ w_k, the weighted second central moment.
+            # similarly, the variance of X_k represents the error of this estimator.
+            q = abs2.(Eks_c)
+            m2 = wmean(q; weights_=w_norm)
+            N_eff = sum(w_norm)^2 / sum(abs2, w_norm)
+            f = N_eff / (N_eff - 1)
+            std_of_var = f * std(w_norm .* (q .- m2))
             
             # The Eks are multiplied by the square root of the importance weights. This ensures that the product with (Oks * sqrt(importance_weights)) correctly recovers the importance weights to the first power.
             Eks_c = Eks_c .* sqrt.(w_norm)
         else
             std_of_mean = sqrt(real.(var_))
-            std_of_var = std(Eks_c .* conj(Eks_c))
+            N = length(Eks_c)
+            f = N / (N - 1)
+            std_of_var = f * std(Eks_c .* conj(Eks_c))
         end
-        return EnergySummary(Eks_c, mean_, std_of_mean, real.(var_), real.(std_of_var), importance_weights; kwargs...)
+        return EnergySummary(Eks_c, mean_, std_of_mean, real.(var_), real.(std_of_var), w_norm; kwargs...)
     end
     return EnergySummary(real.(Eks); importance_weights, kwargs...)
 end
@@ -59,17 +66,25 @@ function EnergySummary(Eks::Vector{Float64}; importance_weights=nothing, mean_=n
         # The estimator for the mean energy is defined as X_k = E_k * w_k; therefore, the variance of X_k represents the error of the estimator.
         std_of_mean = std(real.(Eks_c .* w_norm))
         
-        # The estimator for the variance of the energy is defined as X_k = (E_k - <E>)^2 * w_k; similarly, the variance of X_k represents the error of this estimator.
-        std_of_var = std(real.(Eks_c .^2 .* w_norm))
+        # The estimator for the variance of the energy is defined as X_k = ((E_k - <E>)^2 - m2) * w_k; 
+        #  m2 = Σₖ w_k q_k / Σₖ w_k, the weighted second central moment.
+        # similarly, the variance of X_k represents the error of this estimator.
+        q = abs2.(Eks_c)
+        m2 = wmean(q; weights_=w_norm)
+        N_eff = sum(w_norm)^2 / sum(abs2, w_norm)
+        f = N_eff / (N_eff - 1)
+        std_of_var = f * std(w_norm .* (q .- m2))
         
         # The Eks are multiplied by the square root of the importance weights. This ensures that the product with (Oks * sqrt(importance_weights)) correctly recovers the importance weights to the first power.
         Eks_c = Eks_c .* sqrt.(w_norm)
     else
         std_of_mean = sqrt(real.(var_))
-        std_of_var = std(Eks_c .^ 2)
+        N = length(Eks_c)
+        f = N / (N - 1)
+        std_of_var = f * std(Eks_c .^ 2)
     end
 
-    return EnergySummary(Eks_c, mean_, std_of_mean, var_, std_of_var, importance_weights; kwargs...)
+    return EnergySummary(Eks_c, mean_, std_of_mean, var_, std_of_var, w_norm; kwargs...)
 end
 
 Statistics.mean(Es::EnergySummary) = Es.mean
@@ -105,15 +120,6 @@ end
 function uncentered(Es::EnergySummary)
     Esd = centered(Es; mode=:no_importance)
     return Esd .+ Es.mean
-end
-
-function effective_sample_nr(Es::EnergySummary)
-    if Es.importance_weights === nothing
-        return length(Es)
-    else
-        error = energy_error(Es)
-        return Es.var / error^2
-    end
 end
 
 function weight_effective_sample_nr(Es::EnergySummary)
@@ -163,7 +169,7 @@ function EnergySummary(θ::ParameterTypes, Eks_; sample_nr=100, timer=TimerOutpu
         Eks = out[:Eks]
     else error("Oks_and_Eks should return Dict with key :Eks") end
     if haskey(out, :Oks)
-        warning("Oks should not be returned by the Eks function and will be ignored.")
+        warn("Oks should not be returned by the Eks function and will be ignored.")
     end
     if haskey(out, :weights)
         kwargs[:importance_weights] = out[:weights]
